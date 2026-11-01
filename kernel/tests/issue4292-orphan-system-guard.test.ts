@@ -23,15 +23,20 @@ function sys(content: AnthropicSystemMessage["content"]): AnthropicSystemMessage
   return { role: "system", content };
 }
 
-/** Indices of system entries that violate the Anthropic position rule
- *  (neither last nor immediately followed by an assistant message). */
+/** Indices of system entries that violate the two-sided Anthropic position
+ *  rule (#5432): a run must follow a user message AND be last or be
+ *  immediately followed by an assistant message. */
 function orphans(messages: AnthropicWireMessage[]): number[] {
   const bad: number[] = [];
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i];
     if (m.role !== "system") continue;
-    const next = messages[i + 1];
-    if (!next || next.role === "assistant") continue;
+    let k = i + 1;
+    while (k < messages.length && messages[k]!.role === "system") k++;
+    let s = i;
+    while (s > 0 && messages[s - 1]!.role === "system") s--;
+    const next = messages[k];
+    if ((!next || next.role === "assistant") && (s === 0 || messages[s - 1]!.role === "user")) continue;
     bad.push(i);
   }
   return bad;

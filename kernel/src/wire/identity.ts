@@ -45,6 +45,7 @@ export const CANONICAL_IMAGE_TEXT = "[image]";
 /** Canonical placeholder for an opaque redacted-thinking payload
  *  (anthropic-only shape; kept for symmetry with the legacy codec text). */
 export const CANONICAL_REDACTED_THINKING_TEXT = "[redacted_thinking]";
+export const CANONICAL_EMPTY_THINKING_SEED = "[thinking-signature]";
 
 /**
  * Canonical JSON for tool-call arguments: parse → recursively sort object

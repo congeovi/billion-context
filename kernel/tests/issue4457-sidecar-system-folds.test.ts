@@ -89,7 +89,10 @@ function orphanSystems(
     let k = j + 1;
     while (k < messages.length && messages[k]!.role === "system") k++;
     const next = messages[k];
-    if (!next || next.role === "assistant") continue;
+    let s = j;
+    while (s > 0 && messages[s - 1]!.role === "system") s--;
+    const prev = messages[s - 1];
+    if ((!next || next.role === "assistant") && (!prev || prev.role === "user")) continue;
     bad.push(j);
   }
   return bad;
