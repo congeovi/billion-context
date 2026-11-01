@@ -1,6 +1,7 @@
 import type { BiliMessage } from "./bili-message.js";
 import {
   CANONICAL_IMAGE_TEXT,
+  CANONICAL_EMPTY_THINKING_SEED,
   CANONICAL_REDACTED_THINKING_TEXT,
   canonicalToolArgs,
   deriveCanonicalMessageId,
@@ -198,10 +199,12 @@ export function anthropicToCore(body: AnthropicRequestBody): Flat {
           break;
         }
         case "thinking": {
+          // Hosts that hide thinking send text "" + signature — the
+          // signature is the only distinguishing byte, so it seeds the id.
           const base = deriveCanonicalMessageId(
             "assistant",
             "reasoning",
-            b.thinking,
+            b.thinking !== "" ? b.thinking : `${CANONICAL_EMPTY_THINKING_SEED}${b.signature ?? ""}`,
           );
           msgs.push({
             id: clusters.next(base),
@@ -260,7 +263,7 @@ export function anthropicToCore(body: AnthropicRequestBody): Flat {
           const base = deriveCanonicalMessageId(
             m.role,
             "text",
-            CANONICAL_REDACTED_THINKING_TEXT,
+            `${CANONICAL_REDACTED_THINKING_TEXT}${typeof b.data === "string" ? b.data : ""}`,
           );
           msgs.push({
             id: clusters.next(base),
@@ -426,6 +429,46 @@ function legitimatesFollowSide(m: AnthropicWireMessage | undefined): boolean {
     return false;
   const lastType = m.content[m.content.length - 1]!.type;
   return typeof lastType === "string" && lastType.endsWith("tool_result");
+}
+
+/** Positional legality of every non-directive mid-conversation system entry
+ *  per Anthropic's two-sided rule (follows user / server-tool-result
+ *  assistant AND precedes assistant / ends the array). */
+function legalSystemRunAt(out: readonly AnthropicWireMessage[], j: number): boolean {
+  let start = j;
+  while (start > 0 && out[start - 1]!.role === "system") start--;
+  let k = j + 1;
+  while (k < out.length && out[k]!.role === "system") k++;
+  const next = out[k];
+  if (next && next.role !== "assistant") return false;
+  return legitimatesFollowSide(out[start - 1]);
+}
+
+export function illegalAnthropicSystemPositions(out: readonly AnthropicWireMessage[]): number[] {
+  const bad: number[] = [];
+  for (let j = 0; j < out.length; j++) {
+    const e = out[j]!;
+    if (e.role !== "system" || isDirectiveOnlySystem(e)) continue;
+    if (!legalSystemRunAt(out, j)) bad.push(j);
+  }
+  return bad;
+}
+
+/** #5432: append ephemeral user messages (nudge, notes) WITHOUT breaking a
+ *  legal trailing system run — the run is legal at array end only, so the
+ *  new users slot in just before it (the run's predecessor becomes a user,
+ *  keeping the follow side legal too). Client bytes stay verbatim; only the
+ *  host-injected entries move. */
+export function appendAnthropicUserMessages(
+  messages: AnthropicWireMessage[],
+  contents: readonly string[],
+): AnthropicWireMessage[] {
+  if (contents.length === 0) return messages;
+  const users: AnthropicWireMessage[] = contents.map((content) => ({ role: "user", content }));
+  let start = messages.length;
+  while (start > 0 && messages[start - 1]!.role === "system") start--;
+  if (start === messages.length || start === 0) return [...messages, ...users];
+  return [...messages.slice(0, start), ...users, ...messages.slice(start)];
 }
 
 function healIllegalSystemPositions(out: AnthropicWireMessage[]): void {
